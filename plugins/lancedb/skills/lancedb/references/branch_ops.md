@@ -2,7 +2,7 @@
 
 Manage branches on a LanceDB table: list what exists, create new ones, delete stale ones, and direct read/write operations at a specific branch without touching main. Use for branch lifecycle tasks, experimental/isolated table versions, targeting an operation at a non-main branch, or confirming a mutation did not affect main.
 
-Works on local/OSS and remote Enterprise/Cloud tables, except merging a branch into main, which is Enterprise-only.
+Works on local/OSS and remote Enterprise/Cloud tables, except cherry-picking a branch onto main, which is Enterprise-only.
 
 ## The branch model (important)
 
@@ -101,60 +101,60 @@ assert b"lancedb:description" not in (table.schema.field("category").metadata or
 
 Two handles on the same branch see each other's writes (e.g. `table.branches.create("exp")` and `db.open_table(name, branch="exp")`); main stays isolated.
 
-## Merging a branch into main (Enterprise only)
+## Cherry-picking a branch onto main (Enterprise only)
 
-Merge is available through the SDKs (`table.branches.merge(...)`) on **Enterprise tables only** — it is not supported on Cloud or local/OSS tables, which raise `NotSupported`.
+Cherry-pick is available through the SDKs (`table.branches.cherry_pick(...)`) on **Enterprise tables only** — it is not supported on Cloud or local/OSS tables, which raise `NotSupported`.
 
-`merge` takes the branch to merge **from** and a `dry_run` flag. Both the SDK method and the underlying REST endpoint **actually merge by default** (`dry_run=False`); pass `dry_run=True` to only preview. A rejected merge is **not an exception** — it returns a result with `status="rejected"` rather than raising, so inspect the return value. Use `branches.diff(from_branch)` to inspect a branch's pending diff without attempting a merge.
+`cherry_pick` takes the branch to cherry-pick **from** and a `dry_run` flag. Both the SDK method and the underlying REST endpoint **actually cherry-pick by default** (`dry_run=False`); pass `dry_run=True` to only preview. A failed cherry-pick is **not an exception** — it returns a result with `status="failed"` rather than raising, so inspect the return value. Use `branches.diff(from_branch)` to inspect a branch's pending diff without attempting a cherry-pick.
 
 ```python
 exp = "experiment-reindex"
 
-# preview only — returns status="ready" if it would merge cleanly
-preview = table.branches.merge(exp, dry_run=True)
+# preview only — returns status="ready" if it would cherry-pick cleanly
+preview = table.branches.cherry_pick(exp, dry_run=True)
 
-# actually merge (default)
-result = table.branches.merge(exp)
-if result["status"] == "merged":
+# actually cherry-pick (default)
+result = table.branches.cherry_pick(exp)
+if result["status"] == "cherryPicked":
     print("landed at", result["mainVersionAfter"])
-elif result["status"] == "rejected":
-    print(result["diff"]["mergeBlockers"])   # why it was refused
+elif result["status"] == "failed":
+    print(result["diff"]["errors"])   # why it was refused
 
-# inspect a branch's pending diff without merging
+# inspect a branch's pending diff without cherry-picking
 diff = table.branches.diff(exp)
 ```
 
-Async: `await table.branches.merge(exp)`, `await table.branches.diff(exp)`.
+Async: `await table.branches.cherry_pick(exp)`, `await table.branches.diff(exp)`.
 
 ```typescript
 const branches = await table.branches();
 const exp = "experiment-reindex";
 
 // preview only (second arg is dryRun)
-const preview = await branches.merge(exp, true);
+const preview = await branches.cherryPick(exp, true);
 
-// actually merge (default)
-const result = await branches.merge(exp);
-if (result.status === "merged") {
+// actually cherry-pick (default)
+const result = await branches.cherryPick(exp);
+if (result.status === "cherryPicked") {
   console.log("landed at", result.mainVersionAfter);
-} else if (result.status === "rejected") {
-  console.log(result.diff.mergeBlockers);
+} else if (result.status === "failed") {
+  console.log(result.diff.errors);
 }
 
 const diff = await branches.diff(exp);
 ```
 
-The result is the wire JSON, containing `status` (`ready` on a passing dry run, `merged` on success, `rejected` when refused — also `notImplemented`/`unknown`), the branch `diff` (including `mergeBlockers` explaining any rejection), a `preview` of the columns that would be promoted, and — after a real merge — `mainVersionAfter`.
+The result is the wire JSON, containing `status` (`ready` on a passing dry run, `cherryPicked` on success, `failed` when it does not apply — also `notImplemented`/`unknown`), the branch `diff` (including `errors` explaining any failure), a `preview` of the columns that would be promoted, and — after a real cherry-pick — `mainVersionAfter`.
 
-### Merge preconditions
+### Cherry-pick preconditions
 
-Merge only **promotes newly added columns** onto main; it does not replay arbitrary commits. Practically, a branch is mergeable only if it has **exactly one commit since it was created, and that commit added a column**. The merge is rejected (`status: "rejected"`, with `mergeBlockers` set) if:
+Cherry-pick only **promotes newly added columns** onto main; it does not replay arbitrary commits. Practically, a branch is cherry-pickable only if it has **exactly one commit since it was created, and that commit added a column**. The cherry-pick fails (`status: "failed"`, with `errors` set) if:
 
 - the branch was forked from another branch rather than directly from main
 - main has advanced since the branch was forked
 - the branch's rows changed since the fork (row counts must match main exactly)
 - the branch removed columns or changed a column's type/nullability
-- the branch added no columns (index-only changes are not merged)
+- the branch added no columns (index-only changes are not cherry-picked)
 
 ### Adding a column in a single commit
 
@@ -176,7 +176,7 @@ Because the branch must contain just one column-adding commit, add the column wi
 | Delete branch | `table.branches.delete(name)` | `await branches.delete(name)` |
 | Which branch is this handle on? | `table.current_branch()` (`None` = main) | `table.currentBranch()` (`null` = main) |
 | Target main | use the original (non-branch) handle | use the original (non-branch) handle |
-| Merge branch into main (Enterprise only) | `table.branches.merge(from_branch, dry_run=False)` | `await branches.merge(fromBranch, dryRun)` |
+| Cherry-pick branch onto main (Enterprise only) | `table.branches.cherry_pick(from_branch, dry_run=False)` | `await branches.cherryPick(fromBranch, dryRun)` |
 | Preview a branch's pending diff (Enterprise only) | `table.branches.diff(from_branch)` | `await branches.diff(fromBranch)` |
 
 Branch names must be non-empty; empty names raise a validation error.
